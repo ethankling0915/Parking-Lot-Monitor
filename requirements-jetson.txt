@@ -1,0 +1,6 @@
+# Jetson. Torch and OpenCV come from JetPack/NVIDIA, so they are not listed here.
+# ultralytics may still pull in opencv-python; see README.
+ultralytics
+numpy
+pyyaml
+pytest

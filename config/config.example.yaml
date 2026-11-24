@@ -1,0 +1,26 @@
+# Copy to config/config.yaml and edit. config.yaml is git-ignored.
+
+source: 0                  # camera index (0 = first webcam), or a path to an .mp4 clip
+frame_width: 1920
+frame_height: 1080
+
+model: yolo26n.pt          # on the Jetson, point this at the exported .engine file
+imgsz: 960                 # must match the size the model was exported at
+conf: 0.35
+vehicle_classes: [2, 3, 5, 7]   # COCO ids for car, motorcycle, bus, truck. null = keep all classes.
+
+process_every_n_frames: 3  # a parking lot changes slowly; this saves compute
+debounce_seconds: 5        # a change must hold this long before it counts as an event
+
+window:                    # the service is only active between these times (live camera only)
+  start: "07:00"
+  end: "19:00"
+
+db_path: data/events.db
+
+# Zone polygons in pixels of the frame size above (x, y points, clockwise).
+# A vehicle counts as parked in a zone when the bottom-center of its box is inside the polygon.
+# These coordinates are placeholders. Replace them with coordinates from a frame of your footage.
+zones:
+  spot_1: [[400, 600], [520, 600], [520, 760], [400, 760]]
+  spot_2: [[530, 600], [650, 600], [650, 760], [530, 760]]

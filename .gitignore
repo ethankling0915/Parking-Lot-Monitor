@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+config/config.yaml
+data/
+clips/
+runs/
+*.pt
+*.onnx
+*.engine

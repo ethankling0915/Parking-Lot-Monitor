@@ -1,0 +1,15 @@
+[Unit]
+Description=Parking lot monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Replace <your-user> with the Jetson user and adjust the path if the repo lives elsewhere.
+User=<your-user>
+WorkingDirectory=/home/<your-user>/parking-lot-monitor
+ExecStart=/home/<your-user>/parking-lot-monitor/.venv/bin/python -m parking_monitor.main --config config/config.yaml
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,6 @@
+# Windows development. Install a CUDA build of torch first (see README).
+ultralytics
+opencv-python
+numpy
+pyyaml
+pytest
