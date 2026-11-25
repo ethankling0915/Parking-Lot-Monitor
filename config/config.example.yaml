@@ -4,17 +4,17 @@ source: 0                  # camera index (0 = first webcam), or a path to an .m
 frame_width: 1920
 frame_height: 1080
 
-model: yolo26n.pt          # on the Jetson, point this at the exported .engine file
-imgsz: 960                 # must match the size the model was exported at
-conf: 0.35
-vehicle_classes: [2, 3, 5, 7]   # COCO ids for car, motorcycle, bus, truck. null = keep all classes.
+model: runs/detect/runs/parking/weights/best.pt
+imgsz: 960
+conf: 0.4                          # raised from 0.35 to cut low-confidence clutter
+counted_classes: [vehicle, my_car] # person is detected but doesn't occupy a spot
 
 process_every_n_frames: 3  # a parking lot changes slowly; this saves compute
 debounce_seconds: 5        # a change must hold this long before it counts as an event
 
 window:                    # the service is only active between these times (live camera only)
   start: "07:00"
-  end: "19:00"
+  end: "17:00"
 
 db_path: data/events.db
 
