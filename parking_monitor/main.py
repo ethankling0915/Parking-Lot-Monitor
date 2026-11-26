@@ -15,6 +15,7 @@ import yaml
 from parking_monitor.camera import is_live, open_source
 from parking_monitor.detector import Detector
 from parking_monitor.events import EventLog
+from parking_monitor.notify import MeshNotifier
 from parking_monitor.occupancy import ZoneState
 from parking_monitor.zones import Zone, occupied_zone_names
 
@@ -36,6 +37,8 @@ def parse_args():
                    help="run even outside the daytime window")
     p.add_argument("--show", action="store_true",
                    help="show zones and detections (needs a display)")
+    p.add_argument("--mesh", action="store_true",
+                   help="send mesh messages even for a clip (for testing)")
     return p.parse_args()
 
 
@@ -71,78 +74,93 @@ def main():
     states = {z.name: ZoneState(z.name, cfg["debounce_seconds"]) for z in zones}
     visit_state = ZoneState(visit_zone_name, cfg["debounce_seconds"])
 
+    # Mesh messages go out only for the live camera. Replays print what would be sent.
+    mesh_cfg = cfg.get("mesh", {})
+    notifier = MeshNotifier(
+        port=mesh_cfg.get("port"),
+        channel_index=mesh_cfg.get("channel_index", 0),
+        enabled=bool(mesh_cfg.get("enabled", False)) and (live or args.mesh),
+    )
+
     detector = Detector(cfg["model"], cfg["imgsz"], cfg["conf"])
     log = EventLog(db_path)
     log.log("start", detail=f"source={source}")
 
     cap = None
     frame_no = 0
-    while True:
-        # Pause and daytime window apply to the live camera only. Replays always run.
-        active = not PAUSE_FILE.exists() and (
-            not live or args.ignore_window
-            or in_window(cfg["window"]["start"], cfg["window"]["end"])
-        )
-        if not active:
-            # Release the camera so other programs (like drone work) can use it.
-            if cap is not None:
+    try:
+        while True:
+            # Pause and daytime window apply to the live camera only. Replays always run.
+            active = not PAUSE_FILE.exists() and (
+                not live or args.ignore_window
+                or in_window(cfg["window"]["start"], cfg["window"]["end"])
+            )
+            if not active:
+                # Release the camera so other programs (like drone work) can use it.
+                if cap is not None:
+                    cap.release()
+                    cap = None
+                time.sleep(30)
+                continue
+
+            if cap is None:
+                cap = open_source(source, width, height)
+
+            ok, frame = cap.read()
+            if not ok:
+                if not live:
+                    break  # end of clip
+                log.log("camera_error")
                 cap.release()
                 cap = None
-            time.sleep(30)
-            continue
+                time.sleep(5)
+                continue
 
-        if cap is None:
-            cap = open_source(source, width, height)
+            frame_no += 1
+            if frame_no % cfg["process_every_n_frames"]:
+                continue
 
-        ok, frame = cap.read()
-        if not ok:
-            if not live:
-                break  # end of clip
-            log.log("camera_error")
-            cap.release()
-            cap = None
-            time.sleep(5)
-            continue
+            # Live frames use wall-clock time. Clips use video time so replays
+            # behave the same whether they play fast or slow.
+            ts = time.time() if live else cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
 
-        frame_no += 1
-        if frame_no % cfg["process_every_n_frames"]:
-            continue
+            detections = detector.detect(frame)
 
-        # Live frames use wall-clock time. Clips use video time so replays
-        # behave the same whether they play fast or slow.
-        ts = time.time() if live else cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
+            # Spot occupancy: any counted vehicle (including your car) in a zone.
+            boxes = [(x1, y1, x2, y2) for name, x1, y1, x2, y2 in detections if name in counted]
+            occupied = occupied_zone_names(boxes, zones)
+            for zone in zones:
+                change = states[zone.name].update(ts, zone.name in occupied)
+                if change:
+                    log.log(change, zone=zone.name, ts=ts)
+                    print(f"{zone.name}: {change}")
 
-        detections = detector.detect(frame)
-
-        # Spot occupancy: any counted vehicle (including your car) in a zone.
-        boxes = [(x1, y1, x2, y2) for name, x1, y1, x2, y2 in detections if name in counted]
-        occupied = occupied_zone_names(boxes, zones)
-        for zone in zones:
-            change = states[zone.name].update(ts, zone.name in occupied)
+            # Visits: your car (my_car only) inside the parking area.
+            my_car_boxes = [(x1, y1, x2, y2) for name, x1, y1, x2, y2 in detections
+                            if name == "my_car"]
+            my_car_in_area = visit_zone_name in occupied_zone_names(my_car_boxes, [visit_zone])
+            change = visit_state.update(ts, my_car_in_area)
             if change:
-                log.log(change, zone=zone.name, ts=ts)
-                print(f"{zone.name}: {change}")
+                now_str = time.strftime("%H:%M")
+                if change == "occupied":
+                    kind, message = "my_car_arrived", f"Welcome back ({now_str})"
+                else:
+                    kind, message = "my_car_left", f"See you later ({now_str})"
+                log.log(kind, zone=visit_zone_name, ts=ts)
+                print(f"{kind} in {visit_zone_name}")
+                notifier.send(message)
 
-        # Visits: your car (my_car only) inside the parking area.
-        my_car_boxes = [(x1, y1, x2, y2) for name, x1, y1, x2, y2 in detections
-                        if name == "my_car"]
-        my_car_in_area = visit_zone_name in occupied_zone_names(my_car_boxes, [visit_zone])
-        change = visit_state.update(ts, my_car_in_area)
-        if change:
-            kind = "my_car_arrived" if change == "occupied" else "my_car_left"
-            log.log(kind, zone=visit_zone_name, ts=ts)
-            print(f"{kind} in {visit_zone_name}")
-
-        if args.show:
-            draw(frame, zones, detections, occupied)
-            cv2.imshow("parking-lot-monitor", frame)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
-
-    if cap is not None:
-        cap.release()
-    log.log("stop")
-    cv2.destroyAllWindows()
+            if args.show:
+                draw(frame, zones, detections, occupied)
+                cv2.imshow("parking-lot-monitor", frame)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
+    finally:
+        if cap is not None:
+            cap.release()
+        notifier.close()
+        log.log("stop")
+        cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
