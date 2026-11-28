@@ -4,10 +4,10 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-# Replace <your-user> with the Jetson user and adjust the path if the repo lives elsewhere.
-User=<your-user>
-WorkingDirectory=/home/<your-user>/parking-lot-monitor
-ExecStart=/home/<your-user>/parking-lot-monitor/.venv/bin/python -m parking_monitor.main --config config/config.yaml
+# Jetson user is team1. If the repo lives elsewhere, change WorkingDirectory and ExecStart to match.
+User=team1
+WorkingDirectory=/home/team1/parking-lot-monitor
+ExecStart=/home/team1/parking-lot-monitor/.venv/bin/python -m parking_monitor.main --config config/config.yaml
 Restart=on-failure
 RestartSec=10
 
